@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+
+    <link rel="stylesheet" href="/webjars/bootstrap/4.4.1/css/bootstrap.min.css" />
+
+    <script src="/webjars/babel-standalone/6.26.0/babel.js"></script>
+    <script src="/webjars/sockjs-client/sockjs.min.js"></script>
+    <script src="/webjars/stomp-websocket/stomp.min.js"></script>
+    <script src="/webjars/react/16.13.1/umd/react.development.js"></script>
+    <script src="/webjars/react-dom/16.13.1/umd/react-dom.development.js"></script>
+    <script src="/webjars/redux/4.0.5/dist/redux.js"></script>
+    <script src="/webjars/react-redux/7.1.3/dist/react-redux.js"></script>
+
+    <script type="text/babel" data-presets="react">
+
+        const { Provider, connect } = ReactRedux;
+        const { combineReducers, createStore } = Redux;
+
+        const LOAD_THREADS = 'LOAD_THREADS';
+        const ADD_ALERT = 'ADD_ALERT';
+
+        const threads = (state = [], action) => {
+            switch (action.type) {
+                case LOAD_THREADS:
+                    return action.threads;
+                default:
+                    return state;
+            }
+        }
+
+        const alerts = (state = [], action) => {
+            switch (action.type) {
+                case ADD_ALERT:
+                    return [action.alert, ...state].slice(0, 10);
+                default:
+                    return state;
+            }
+        }
+
+        const reducer = combineReducers({
+            threads,
+            alerts
+        });
+
+
+        const store = createStore(reducer, { threads: [], alerts: [] });
+
+        class StackTrace extends React.Component {
+
+            constructor(props) {
+                super(props)
+                this.state = {
+                    opened: false
+                }
+                this.toggle = this.toggle.bind(this)
+            }
+
+
+
+            toggle() {
+                this.setState(state => ({ opened: !state.opened }))
+                return false;
+            }
+
+            render() {
+                return <div>
+                    <a href="#" onClick={this.toggle}>StackTrace</a>
+                    <div className={this.state.opened ? '' : 'collapse'}>
+                        {this.props.stacktrace.map(
+                            (se, i) => <div key={i}>{se}</div>
+                        )}
+                    </div>
+                </div>
+            }
+
+        }
+
+        function Alert({ threadId, type, date }) {
+            const className = (type === 'CONNECTED' || type === 'RESUMED') ? 'alert alert-success' : 'alert alert-danger'
+            let message;
+            switch (type) {
+                case 'CONNECTED':
+                    message = 'Successfuly connected to application'
+                    break;
+                case 'DISCONNECTED':
+                    message = 'Connection was lost'
+                    break;
+                case 'RESUMED':
+                    message = `Thread ${threadId} was resumed`
+                    break;
+                case 'STUCK':
+                    message = `Thread ${threadId} got stuck`
+                    break
+            }
+            return <div className={className}>
+                {`[${date}]${message}`}
+            </div>
+        }
+
+        const Alerts = connect(({alerts}) => ({alerts}))(({alerts}) => {
+            return <div>
+                {alerts.map(alert => <Alert
+                    key={alert.id}
+                    date={alert.date}
+                    type={alert.type}
+                    threadId={alert.threadId}
+                />)}
+            </div>;
+        })
+
+
+        const Threads = connect(({threads}) => ({threads}))(({threads}) => {
+            return <div>
+                <table className="table">
+                    <thead>
+                    <tr>
+                        <td>Id</td>
+                        <td>Name</td>
+                        <td>state</td>
+                        <td>Update time</td>
+                        <td>StackTrace</td>
+                    </tr>
+                    </thead>
+                    <tbody>
+                    {threads.map(thread => <tr key={thread.id}>
+                        <td>{thread.id}</td>
+                        <td>{thread.name}</td>
+                        <td>{thread.state}</td>
+                        <td>{thread.updateTime}</td>
+                        <td><StackTrace stacktrace={thread.stackTrace}/></td>
+                    </tr>)}
+                    </tbody>
+                </table>
+            </div>;
+        })
+
+        function App() {
+            return <div className="container-fluid">
+                <div className="row">
+                    <div className="col-2">
+                        <Alerts/>
+                    </div>
+                    <div className="col-10">
+                        <Threads/>
+                    </div>
+                </div>
+            </div>
+        }
+
+        function startConnection() {
+            var socket = new SockJS('/monitor');
+            stompClient = Stomp.over(socket);
+            stompClient.connect({}, function (frame) {
+                stompClient.subscribe('/topic/current-state', function (message) {
+                    store.dispatch({
+                            type: LOAD_THREADS,
+                            threads: JSON.parse(message.body)
+                        }
+                    );
+                });
+                stompClient.subscribe('/topic/alert', function (message) {
+                    document.getElementById("alarm").play()
+                    store.dispatch({
+                            type: ADD_ALERT,
+                            alert: JSON.parse(message.body)
+                        }
+                    );
+                });
+            });
+        }
+
+        ReactDOM.render(<Provider store={store}>
+            <App/>
+        </Provider>, document.getElementById("app"), () => { startConnection() })
+
+    </script>
+
+    <title>Vault thread monitoring</title>
+</head>
+<body>
+<audio id="alarm" src="/alarm.mp3" preload="auto"></audio>
+<div id="app"></div>
+
+
+</body>
+</html>
